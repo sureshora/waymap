@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wonders of the World and 3D Map</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        .map-container {
+            height: 60%;
+            min-height: 500px;
+            border: 1px solid #ddd;
+        }
+
+        gmp-map-3d {
+            height: 100%;
+            width: 100%;
+        }
+
+        .wonder-item:hover {
+            cursor: pointer;
+            background-color: #f8f9fa;
+        }
+
+        .loading-message {
+            text-align: center;
+            font-size: 1.2em;
+            margin-top: 2em;
+        }
+
+        #camera-metrics {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-top: 10px;
+            background-color: #f8f8f8;
+            font-family: monospace;
+        }
+
+        #camera-metrics span {
+            display: inline-block;
+            min-width: 100px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid">
+        <header class="py-3 text-center bg-dark text-white">
+            <h1>WayMap</h1>
+            <p>Explore Wonders of the World and Interactive 3D Maps!</p>
+        </header>
+
+        <div class="row">
+            <div class="col-md-4 p-3">
+                <h2 class="text-center">Wonders of the World</h2>
+                <div id="wonders-list" class="mt-4"></div>
+                <div class="text-start mt-4">
+                    <a href="../index.html" class="btn btn-primary btn-lg d-inline-flex align-items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                            class="bi bi-arrow-left me-2" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd"
+                                d="M15 8a.5.5 0 0 1-.5.5H2.707l3.147 3.146a.5.5 0 0 1-.708.708l-4-4a.5.5 0 0 1 0-.708l4-4a.5.5 0 1 1 .708.708L2.707 7.5H14.5A.5.5 0 0 1 15 8z" />
+                        </svg>
+                        Return to Home
+                    </a>
+                </div>
+            </div>
+
+            <div class="col-md-8 p-3">
+                <h2 class="text-center">Interactive 3D Map</h2>
+                <div class="map-container" id="map-container">
+                    <div class="loading-message" id="loading-message">Loading map...</div>
+                </div>
+                <div id="camera-metrics"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let apiKey;
+        let map;
+        let wondersData;
+
+        const loadingMessage = document.getElementById('loading-message');
+
+        // Fetch API Key
+        fetch('http://104.197.173.36:5000/api/config')
+            .then(response => response.json())
+            .then(data => {
+                apiKey = data.api_key;
+                loadMapData();
+            })
+            .catch(error => displayError("Failed to fetch API key."));
+
+        function loadMapData() {
+            fetch('http://104.197.173.36:5000/api/wonders')
+                .then(response => response.json())
+                .then(data => {
+                    wondersData = data;
+                    createMap(wondersData);
+                    populateWondersList(wondersData);
+                })
+                .catch(error => displayError("Failed to fetch wonders data."));
+        }
+
+        async function createMap(wonders) {
+            loadingMessage.style.display = 'block';
+            try {
+                const { Map3DElement } = await google.maps.importLibrary('maps3d');
+
+                const mapOptions = {
+                    center: { lat: 20, lng: 0, altitude: 0 },
+                    tilt: 45,
+                    range: 30000000,
+                    defaultLabelsDisabled: true,
+                };
+
+                map = new Map3DElement(mapOptions);
+                const mapContainer = document.getElementById('map-container');
+                mapContainer.appendChild(map);
+
+                // Use a timeout to ensure the map is loaded before hiding the message.
+                setTimeout(() => {
+                    loadingMessage.style.display = 'none';
+                    addMarkers(map, wonders);
+                    if (wonders.length > 0) {
+                        flyToWonder(wonders[0]);
+                    }
+                    addClickListeners(wonders);
+                    map.addListener('camera_changed', updateCameraMetrics);
+                }, 1500); // Increased timeout to 1500ms (1.5 seconds). Adjust as needed
+
+            } catch (error) {
+                loadingMessage.style.display = 'none';
+                displayError("Failed to create map.");
+                console.error("Map creation error:", error);
+            }
+        }
+        function addMarkers(mapInstance, wonders) {
+            wonders.forEach(wonder => {
+                const marker = document.createElement('gmp-map-marker');
+                marker.setAttribute('position', `${wonder.location.lat},${wonder.location.lng},0`);
+                marker.setAttribute('title', wonder.title);
+                mapInstance.append(marker);
+            });
+        }
+
+        function addClickListeners(wonders) {
+            const wonderItems = document.querySelectorAll('.wonder-item');
+            wonderItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    const index = parseInt(item.dataset.index, 10);
+                    flyToWonder(wonders[index]);
+                });
+            });
+        }
+
+        function flyToWonder(wonder) {
+            if (map) {
+                map.flyCameraTo({
+                    endCamera: {
+                        center: { lat: wonder.location.lat, lng: wonder.location.lng, altitude: 1000 },
+                        tilt: 55,
+                        range: 2000,
+                    },
+                    durationMillis: 5000,
+                });
+            } else {
+                console.error('Map not initialized.');
+            }
+        }
+
+        function populateWondersList(wonders) {
+            const wondersList = document.getElementById('wonders-list');
+            wondersList.innerHTML = wonders.map((wonder, index) => `
+                <div class="card mb-3 wonder-item" data-index="${index}">
+                    <div class="card-body">
+                        <h3 class="card-title">${wonder.title}</h3>
+                        <p class="card-text"><strong>Description:</strong> ${wonder.description}</p>
+                        <p class="card-text"><strong>Location:</strong> (${wonder.location.lat}, ${wonder.location.lng})</p>
+                        <p class="card-text"><strong>Length/Size:</strong> ${wonder.length}</p>
+                        <p class="card-text">
+                            <strong>Audio:</strong>
+                            <a href="${wonder.audio}" target="_blank">Listen</a>
+                        </p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function displayError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'alert alert-danger';
+            errorDiv.textContent = message;
+            document.body.appendChild(errorDiv);
+        }
+
+        function updateCameraMetrics() {
+            const camera = map.getCamera();
+            const lat = camera.center.lat.toFixed(4);
+            const lng = camera.center.lng.toFixed(4);
+            const alt = camera.altitude.toFixed(0);
+            const tilt = camera.tilt.toFixed(0);
+            document.getElementById('camera-metrics').innerHTML = `
+                <div>
+                    <span>Latitude:</span> <span>${lat}</span><br>
+                    <span>Longitude:</span> <span>${lng}</span><br>
+                    <span>Altitude:</span> <span>${alt} m</span><br>
+                    <span>Tilt:</span> <span>${tilt}°</span>
+                </div>
+            `;
+        }
+
+        (g => {
+            var h, a, k, p = "The Google Maps JavaScript API",
+                c = "google", l = "importLibrary", q = "__ib__", m = document, b = window;
+            b = b[c] || (b[c] = {});
+            var d = b.maps || (b.maps = {}),
+                r = new Set, e = new URLSearchParams,
+                u = () => h || (h = new Promise(async (f, n) => {
+                    await (a = m.createElement("script"));
+                    e.set("libraries", [...r] + "");
+                    for (k in g) e.set(k.replace(/[A-Z]/g, t => "_" + t[0].toLowerCase()), g[k]);
+                    e.set("callback", c + ".maps." + q);
+                    e.set("key", apiKey);
+                    a.src = `https://maps.${c}apis.com/maps/api/js?` + e;
+                    d[q] = f;
+                    a.onerror = () => h = n(Error(p + " could not load."));
+                    a.nonce = m.querySelector("script[nonce]")?.nonce || "";
+                    m.head.append(a);
+                }));
+            d[l] ? console.warn(p + " only loads once. Ignoring:", g) : d[l] = (f, ...n) => r.add(f) && u().then(() => d[l](f, ...n));
+        })({
+            v: "alpha",
+        });
+    </script>
+</body>
+
+</html>
